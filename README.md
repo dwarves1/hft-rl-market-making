@@ -591,7 +591,3 @@ hft-rl-market-making/
 - **LightweightCharts**: TradingView Open Source
 
 ---
-
-<p align="center">
-  Built for <strong>Toss Bank DS/MLE</strong> Portfolio | 2026
-</p>
