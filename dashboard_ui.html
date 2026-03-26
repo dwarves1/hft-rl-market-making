@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HFT Market Making Dashboard</title>
+
+  <!-- React + Babel (CDN, no build step) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Lightweight Charts (TradingView) -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+
+  <style>
+    /* ────────────────────────────────────────────
+       1. 전역 & 레이아웃
+    ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:    #0d1117;
+      --bg-secondary:  #161b22;
+      --bg-card:       #1c2128;
+      --bg-hover:      #21262d;
+      --border:        #30363d;
+      --text-primary:  #e6edf3;
+      --text-secondary:#8b949e;
+      --text-muted:    #484f58;
+      --green:         #3fb950;
+      --green-dim:     #1e3a2f;
+      --red:           #f85149;
+      --red-dim:       #3d1c1c;
+      --yellow:        #e3b341;
+      --blue:          #58a6ff;
+      --purple:        #bc8cff;
+      --orange:        #ffa657;
+      --agent-bid:     #1f6feb;
+      --agent-ask:     #da3633;
+      --radius:        8px;
+      --font-mono:     'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+
+    html, body { height: 100%; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; }
+
+    #root { height: 100%; display: flex; flex-direction: column; }
+
+    /* ────────────────────────────────────────────
+       2. 헤더
+    ──────────────────────────────────────────── */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 16px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .header-title { font-size: 15px; font-weight: 600; letter-spacing: 0.3px; }
+    .header-title span { color: var(--blue); }
+    .header-meta { display: flex; gap: 16px; align-items: center; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .mid-price { font-size: 18px; font-weight: 700; font-family: var(--font-mono); color: var(--text-primary); }
+    .mid-price.up   { color: var(--green); }
+    .mid-price.down { color: var(--red); }
+    .tick-count { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); }
+
+    /* ────────────────────────────────────────────
+       3. 메인 그리드
+    ──────────────────────────────────────────── */
+    .main-grid {
+      flex: 1; display: grid; overflow: hidden;
+      grid-template-columns: 1fr 280px;
+      grid-template-rows: 1fr 180px;
+      gap: 1px;
+      background: var(--border);
+    }
+
+    .panel {
+      background: var(--bg-primary);
+      overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .panel-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary); }
+    .panel-body { flex: 1; overflow: hidden; position: relative; }
+
+    /* 차트 패널 – col 1, row 1 */
+    .chart-panel { grid-column: 1; grid-row: 1; }
+    /* 호가창 패널 – col 2, row 1~2 */
+    .orderbook-panel { grid-column: 2; grid-row: 1 / 3; }
+    /* 하단 패널 – col 1, row 2 */
+    .bottom-panel { grid-column: 1; grid-row: 2; }
+
+    /* ────────────────────────────────────────────
+       4. 차트 컨테이너
+    ──────────────────────────────────────────── */
+    #chart-container { width: 100%; height: 100%; }
+
+    /* ────────────────────────────────────────────
+       5. 호가창 (Order Book)
+    ──────────────────────────────────────────── */
+    .orderbook-body { padding: 8px; overflow-y: auto; height: 100%; }
+    .ob-spread-row {
+      text-align: center; padding: 4px 0;
+      font-size: 11px; color: var(--text-secondary);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin: 2px 0;
+    }
+    .ob-spread-val { color: var(--yellow); font-family: var(--font-mono); font-weight: 600; }
+    .ob-row {
+      display: grid; grid-template-columns: 1fr auto 1fr;
+      align-items: center; height: 22px; position: relative;
+      border-radius: 3px; overflow: hidden;
+      margin-bottom: 1px;
+    }
+    .ob-row-bg {
+      position: absolute; top: 0; bottom: 0;
+      opacity: 0.15; border-radius: 3px;
+      transition: width 0.15s ease;
+    }
+    .ob-row-bg.bid { left: 0; background: var(--green); }
+    .ob-row-bg.ask { right: 0; background: var(--red); }
+    .ob-vol  { font-family: var(--font-mono); font-size: 11px; z-index: 1; padding: 0 6px; }
+    .ob-price {
+      font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+      text-align: center; z-index: 1; padding: 0 4px;
+    }
+    .ob-price.bid { color: var(--green); }
+    .ob-price.ask { color: var(--red); }
+
+    /* 에이전트 마킹 */
+    .ob-row.agent-bid-row { outline: 1.5px solid var(--agent-bid); outline-offset: -1px; background: rgba(31,111,235,0.08); }
+    .ob-row.agent-ask-row { outline: 1.5px solid var(--agent-ask); outline-offset: -1px; background: rgba(218,54,51,0.08); }
+    .agent-tag {
+      font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 2px;
+      margin-left: 4px; text-transform: uppercase; letter-spacing: 0.5px; z-index: 2;
+    }
+    .agent-tag.bid { background: var(--agent-bid); color: #fff; }
+    .agent-tag.ask { background: var(--agent-ask); color: #fff; }
+
+    .ob-section-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--text-muted); padding: 4px 6px 2px; margin-top: 2px;
+    }
+
+    /* ────────────────────────────────────────────
+       6. 하단 패널 – PnL 게이지 + 볼린저/RSI 알람
+    ──────────────────────────────────────────── */
+    .bottom-body {
+      display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 1px; height: 100%; background: var(--border);
+    }
+    .metric-card {
+      background: var(--bg-card);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 10px 8px; gap: 6px;
+    }
+    .metric-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary); }
+    .metric-value { font-size: 20px; font-weight: 700; font-family: var(--font-mono); }
+    .metric-value.positive { color: var(--green); }
+    .metric-value.negative { color: var(--red); }
+    .metric-value.neutral  { color: var(--text-primary); }
+    .metric-sub { font-size: 10px; color: var(--text-secondary); font-family: var(--font-mono); }
+
+    /* 게이지 */
+    .gauge-wrap { position: relative; width: 80px; height: 44px; }
+    .gauge-svg { overflow: visible; }
+    .gauge-val {
+      position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+      font-size: 11px; font-weight: 700; font-family: var(--font-mono); white-space: nowrap;
+    }
+
+    /* 보상 분해 미니바 */
+    .reward-breakdown { width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 0 4px; }
+    .rb-row { display: flex; align-items: center; gap: 4px; }
+    .rb-label { font-size: 9px; color: var(--text-muted); width: 60px; flex-shrink: 0; }
+    .rb-bar-wrap { flex: 1; height: 6px; background: var(--bg-hover); border-radius: 3px; overflow: hidden; }
+    .rb-bar { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
+
+    /* ────────────────────────────────────────────
+       7. 알람 배너
+    ──────────────────────────────────────────── */
+    .alert-overlay {
+      position: fixed; top: 52px; left: 50%; transform: translateX(-50%);
+      z-index: 1000; pointer-events: none;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    .alert-banner {
+      background: linear-gradient(135deg, #2d1b1b, #1a0f0f);
+      border: 1px solid var(--red);
+      border-left: 4px solid var(--red);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      min-width: 360px; max-width: 480px;
+      box-shadow: 0 4px 24px rgba(248,81,73,0.3);
+      animation: alert-in 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes alert-in {
+      from { transform: translateY(-20px); opacity:0; }
+      to   { transform: translateY(0);     opacity:1; }
+    }
+    .alert-title { font-size: 12px; font-weight: 700; color: var(--red); display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .alert-body  { font-size: 11px; color: var(--text-secondary); line-height: 1.6; }
+    .alert-body strong { color: var(--text-primary); font-family: var(--font-mono); }
+    .alert-agent { margin-top: 6px; padding: 4px 8px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 11px; }
+    .alert-fade-out { animation: alert-out 0.4s ease forwards; }
+    @keyframes alert-out {
+      to { opacity:0; transform: translateY(-10px); }
+    }
+
+    /* ────────────────────────────────────────────
+       8. 범례
+    ──────────────────────────────────────────── */
+    .legend {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+      padding: 4px 12px; background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+    .legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-secondary); }
+    .legend-dot  { width: 10px; height: 2px; border-radius: 1px; }
+
+    /* 스크롤바 */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ──────────────────────────────────────────────
+   WS Hook: 실시간 데이터 수신
+──────────────────────────────────────────────── */
+function useWebSocket(url) {
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastMessage, setLastMessage] = useState(null);
+  const wsRef = useRef(null);
+  const reconnectTimer = useRef(null);
+
+  const connect = useCallback(() => {
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+
+    ws.onopen    = () => setIsConnected(true);
+    ws.onclose   = () => {
+      setIsConnected(false);
+      // 3초 후 재연결
+      reconnectTimer.current = setTimeout(connect, 3000);
+    };
+    ws.onerror   = () => ws.close();
+    ws.onmessage = (e) => {
+      try { setLastMessage(JSON.parse(e.data)); }
+      catch {}
+    };
+  }, [url]);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      clearTimeout(reconnectTimer.current);
+      wsRef.current?.close();
+    };
+  }, [connect]);
+
+  return { isConnected, lastMessage };
+}
+
+/* ──────────────────────────────────────────────
+   SVG 게이지 컴포넌트
+──────────────────────────────────────────────── */
+function Gauge({ value, min, max, label, color }) {
+  const pct   = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const angle = -135 + pct * 270;  // -135° ~ +135°
+  const r = 36, cx = 44, cy = 44;
+  const toRad = (d) => (d * Math.PI) / 180;
+
+  const arcPath = (startDeg, endDeg, radius) => {
+    const s  = toRad(startDeg);
+    const e  = toRad(endDeg);
+    const x1 = cx + radius * Math.cos(s);
+    const y1 = cy + radius * Math.sin(s);
+    const x2 = cx + radius * Math.cos(e);
+    const y2 = cy + radius * Math.sin(e);
+    const large = endDeg - startDeg > 180 ? 1 : 0;
+    return `M ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2}`;
+  };
+
+  const needleX = cx + r * 0.7 * Math.cos(toRad(-135 + pct * 270));
+  const needleY = cy + r * 0.7 * Math.sin(toRad(-135 + pct * 270));
+
+  return (
+    <div className="gauge-wrap" style={{ width: 88, height: 56 }}>
+      <svg width="88" height="56" className="gauge-svg">
+        {/* 배경 트랙 */}
+        <path d={arcPath(-135, 135, r)} fill="none" stroke="#30363d" strokeWidth="6" strokeLinecap="round" />
+        {/* 값 트랙 */}
+        <path d={arcPath(-135, -135 + pct * 270, r)} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round" />
+        {/* 바늘 */}
+        <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke={color} strokeWidth="2" strokeLinecap="round" />
+        <circle cx={cx} cy={cy} r="3" fill={color} />
+        {/* 값 텍스트 */}
+        <text x={cx} y={cy + 18} textAnchor="middle" fontSize="11" fontWeight="700"
+              fontFamily="var(--font-mono)" fill={color}>
+          {value >= 0 ? `+${value.toFixed(0)}` : value.toFixed(0)}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   보상 분해 미니 바
+──────────────────────────────────────────────── */
+function RewardBreakdown({ data }) {
+  if (!data) return null;
+  const items = [
+    { label: 'Spread',  val: data.spread_pnl,      color: '#3fb950', max: 0.01 },
+    { label: 'Rebate',  val: data.rebate,           color: '#58a6ff', max: 0.005 },
+    { label: 'InvPen',  val: -data.inv_penalty,     color: '#f85149', max: 0.005 },
+    { label: 'AdvSel',  val: -data.adv_sel_penalty, color: '#e3b341', max: 0.005 },
+  ];
+  return (
+    <div className="reward-breakdown">
+      {items.map(({ label, val, color, max }) => (
+        <div key={label} className="rb-row">
+          <span className="rb-label">{label}</span>
+          <div className="rb-bar-wrap">
+            <div className="rb-bar" style={{
+              width: `${Math.min(100, Math.abs(val) / max * 100)}%`,
+              background: color,
+            }} />
+          </div>
+          <span style={{ fontSize: 9, color: val >= 0 ? color : '#f85149',
+                         fontFamily: 'var(--font-mono)', width: 44, textAlign: 'right' }}>
+            {val >= 0 ? '+' : ''}{val.toFixed(5)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   호가창 컴포넌트
+──────────────────────────────────────────────── */
+function OrderBook({ data }) {
+  if (!data?.bids?.length) return (
+    <div className="orderbook-body" style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 40 }}>
+      연결 대기 중…
+    </div>
+  );
+
+  const { bids, asks, agent_bid, agent_ask, mid_price, bid_offset, ask_offset } = data;
+  const maxVol = Math.max(...bids.map(b => b.volume), ...asks.map(a => a.volume), 1);
+  const spread = asks[0]?.price - bids[0]?.price;
+
+  return (
+    <div className="orderbook-body">
+      {/* 매도 호가 (역순 = 낮은 가격이 아래) */}
+      <div className="ob-section-label">ASK (매도)</div>
+      {[...asks].reverse().map((row, i) => {
+        const isAgent = Math.abs(row.price - agent_ask) < 0.005;
+        return (
+          <div key={i} className={`ob-row${isAgent ? ' agent-ask-row' : ''}`}>
+            <div className="ob-row-bg ask" style={{ width: `${row.volume / maxVol * 100}%` }} />
+            <span className="ob-vol" style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+              {row.volume.toFixed(1)}
+            </span>
+            <span className="ob-price ask">
+              {row.price.toFixed(2)}
+              {isAgent && <span className="agent-tag ask">AGENT</span>}
+            </span>
+            <span />
+          </div>
+        );
+      })}
+
+      {/* 스프레드 */}
+      <div className="ob-spread-row">
+        스프레드 <span className="ob-spread-val">{spread?.toFixed(2) ?? '–'}</span>
+        &nbsp;|&nbsp; Mid <span className="ob-spread-val">{mid_price?.toFixed(2)}</span>
+      </div>
+
+      {/* 매수 호가 */}
+      <div className="ob-section-label">BID (매수)</div>
+      {bids.map((row, i) => {
+        const isAgent = Math.abs(row.price - agent_bid) < 0.005;
+        return (
+          <div key={i} className={`ob-row${isAgent ? ' agent-bid-row' : ''}`}>
+            <span />
+            <span className="ob-price bid">
+              {row.price.toFixed(2)}
+              {isAgent && <span className="agent-tag bid">AGENT</span>}
+            </span>
+            <span className="ob-vol" style={{ color: 'var(--text-secondary)' }}>
+              {row.volume.toFixed(1)}
+            </span>
+            <div className="ob-row-bg bid" style={{ width: `${row.volume / maxVol * 100}%` }} />
+          </div>
+        );
+      })}
+
+      {/* 에이전트 오프셋 요약 */}
+      <div style={{ marginTop: 8, padding: '6px 8px', background: 'var(--bg-card)', borderRadius: 4 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>에이전트 주문 오프셋</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 11, color: 'var(--agent-bid)', fontFamily: 'var(--font-mono)' }}>
+            BID –{bid_offset}틱 @ {agent_bid?.toFixed(2)}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--agent-ask)', fontFamily: 'var(--font-mono)' }}>
+            ASK +{ask_offset}틱 @ {agent_ask?.toFixed(2)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   알람 배너 컴포넌트
+──────────────────────────────────────────────── */
+function AlertBanner({ alerts }) {
+  if (!alerts.length) return null;
+  return (
+    <div className="alert-overlay">
+      {alerts.map((a) => (
+        <div key={a.id} className={`alert-banner${a.fading ? ' alert-fade-out' : ''}`}>
+          <div className="alert-title">
+            <span>⚠</span>
+            낙폭 과대 신호 감지 — BB 하단 이탈 + RSI 과매도
+          </div>
+          <div className="alert-body">
+            RSI <strong>{a.rsi}</strong> (≤25) &nbsp;|&nbsp;
+            볼린저 밴드 하단 이탈 <strong>ACTIVE</strong>
+          </div>
+          <div className="alert-agent">
+            에이전트 반응 &rarr;&nbsp;
+            <span style={{ color: 'var(--agent-bid)' }}>BID –{a.agent_bid_offset}틱 @ {a.agent_bid?.toFixed(2)}</span>
+            &nbsp;/&nbsp;
+            <span style={{ color: 'var(--agent-ask)' }}>ASK +{a.agent_ask_offset}틱 @ {a.agent_ask?.toFixed(2)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   캔들 차트 (Lightweight Charts)
+──────────────────────────────────────────────── */
+function CandleChart({ newCandle, containerRef }) {
+  const chartRef      = useRef(null);
+  const candleSeriesRef = useRef(null);
+  const vwapRef       = useRef(null);
+  const tenkanRef     = useRef(null);
+  const kijunRef      = useRef(null);
+  const pvtLines      = useRef({});   // P, R1, R2, S1, S2
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const chart = LightweightCharts.createChart(el, {
+      layout:     { background: { color: '#0d1117' }, textColor: '#8b949e' },
+      grid:       { vertLines: { color: '#1c2128' }, horzLines: { color: '#1c2128' } },
+      crosshair:  { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: '#30363d' },
+      timeScale:  { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+      width:  el.clientWidth,
+      height: el.clientHeight,
+    });
+    chartRef.current = chart;
+
+    // 캔들 시리즈
+    const cs = chart.addCandlestickSeries({
+      upColor: '#3fb950', downColor: '#f85149',
+      borderUpColor: '#3fb950', borderDownColor: '#f85149',
+      wickUpColor: '#3fb950', wickDownColor: '#f85149',
+    });
+    candleSeriesRef.current = cs;
+
+    // VWAP
+    vwapRef.current = chart.addLineSeries({
+      color: '#e3b341', lineWidth: 1, lineStyle: 1,
+      title: 'VWAP', priceLineVisible: false,
+    });
+
+    // 일목 전환선
+    tenkanRef.current = chart.addLineSeries({
+      color: '#f85149', lineWidth: 1,
+      title: '전환', priceLineVisible: false,
+    });
+
+    // 일목 기준선
+    kijunRef.current = chart.addLineSeries({
+      color: '#58a6ff', lineWidth: 1,
+      title: '기준', priceLineVisible: false,
+    });
+
+    // 피벗 라인 (R2, R1, P, S1, S2)
+    const pivotDef = [
+      { key: 'R2', color: '#f85149', dash: 2 },
+      { key: 'R1', color: '#ffa657', dash: 2 },
+      { key: 'P',  color: '#8b949e', dash: 0 },
+      { key: 'S1', color: '#3fb950', dash: 2 },
+      { key: 'S2', color: '#3fb950', dash: 2 },
+    ];
+    pivotDef.forEach(({ key, color, dash }) => {
+      pvtLines.current[key] = chart.addLineSeries({
+        color, lineWidth: 1,
+        lineStyle: dash ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+        title: key, priceLineVisible: false,
+      });
+    });
+
+    // 리사이즈 옵저버
+    const ro = new ResizeObserver(() => {
+      chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+    });
+    ro.observe(el);
+
+    return () => { ro.disconnect(); chart.remove(); };
+  }, []);
+
+  // 새 캔들 수신 시 시리즈 업데이트
+  useEffect(() => {
+    if (!newCandle || !candleSeriesRef.current) return;
+    const d = newCandle;
+    const t = d.time;
+
+    candleSeriesRef.current.update({ time: t, open: d.open, high: d.high, low: d.low, close: d.close });
+    if (d.vwap)   vwapRef.current?.update({ time: t, value: d.vwap });
+    if (d.tenkan) tenkanRef.current?.update({ time: t, value: d.tenkan });
+    if (d.kijun)  kijunRef.current?.update({ time: t, value: d.kijun });
+
+    ['R2','R1','P','S1','S2'].forEach(k => {
+      const val = d[`pivot_${k}`];
+      if (val) pvtLines.current[k]?.update({ time: t, value: val });
+    });
+  }, [newCandle]);
+
+  return null;
+}
+
+/* ──────────────────────────────────────────────
+   RSI / 볼린저 하단 패널
+──────────────────────────────────────────────── */
+function BottomPanel({ metrics, latestCandle }) {
+  const pnl      = metrics?.total_pnl   ?? 0;
+  const inv      = metrics?.inventory   ?? 0;
+  const tick     = metrics?.tick        ?? 0;
+  const rsi      = latestCandle?.rsi    ?? 50;
+  const bbBreak  = !!latestCandle?.bb_lower_break;
+
+  const invPct  = Math.abs(inv) / 50;     // MAX_INVENTORY = 50
+  const invColor = invPct > 0.7 ? 'var(--red)' : invPct > 0.4 ? 'var(--yellow)' : 'var(--green)';
+  const rsiColor = rsi <= 25 ? 'var(--red)' : rsi >= 75 ? 'var(--orange)' : 'var(--text-primary)';
+
+  return (
+    <div className="bottom-body">
+      {/* 누적 PnL */}
+      <div className="metric-card">
+        <span className="metric-label">누적 PnL</span>
+        <Gauge value={pnl} min={-5000} max={5000}
+               color={pnl >= 0 ? 'var(--green)' : 'var(--red)'} />
+        <span className="metric-value" style={{ fontSize: 15, color: pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+        </span>
+        <span className="metric-sub">Tick #{tick}</span>
+      </div>
+
+      {/* 재고 위험도 */}
+      <div className="metric-card">
+        <span className="metric-label">재고 위험도</span>
+        <Gauge value={Math.abs(inv)} min={0} max={50} color={invColor} />
+        <span className="metric-value" style={{ fontSize: 15, color: invColor }}>
+          {inv >= 0 ? '+' : ''}{inv.toFixed(1)}
+        </span>
+        <span className="metric-sub" style={{ color: invColor }}>
+          {invPct > 0.7 ? '⚠ 과다 노출' : invPct > 0.4 ? '주의' : '정상'}
+        </span>
+      </div>
+
+      {/* RSI + BB 알람 */}
+      <div className="metric-card">
+        <span className="metric-label">RSI(14)</span>
+        <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-mono)', color: rsiColor }}>
+          {rsi.toFixed(1)}
+        </div>
+        <div style={{
+          fontSize: 10, padding: '2px 8px', borderRadius: 4, marginTop: 2,
+          background: bbBreak ? 'var(--red-dim)' : 'var(--bg-hover)',
+          color: bbBreak ? 'var(--red)' : 'var(--text-muted)',
+          border: `1px solid ${bbBreak ? 'var(--red)' : 'transparent'}`,
+        }}>
+          {bbBreak ? '▼ BB 하단 이탈' : 'BB 정상'}
+        </div>
+        {bbBreak && rsi <= 25 && (
+          <div style={{ fontSize: 10, color: 'var(--red)', animation: 'pulse 1s infinite', marginTop: 2 }}>
+            ⚠ 매수 신호 감지
+          </div>
+        )}
+      </div>
+
+      {/* 보상 분해 */}
+      <div className="metric-card" style={{ alignItems: 'stretch', justifyContent: 'center' }}>
+        <span className="metric-label" style={{ marginBottom: 4 }}>보상 분해</span>
+        <RewardBreakdown data={metrics} />
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   메인 App
+──────────────────────────────────────────────── */
+function App() {
+  const WS_URL = `ws://${window.location.host}/ws`;
+  const { isConnected, lastMessage } = useWebSocket(WS_URL);
+
+  const [orderbook,    setOrderbook]    = useState(null);
+  const [metrics,      setMetrics]      = useState(null);
+  const [latestCandle, setLatestCandle] = useState(null);
+  const [newCandle,    setNewCandle]    = useState(null);
+  const [alerts,       setAlerts]       = useState([]);
+  const [midDir,       setMidDir]       = useState('');
+  const prevMid = useRef(0);
+
+  const chartContainerRef = useRef(null);
+
+  // 메시지 라우팅
+  useEffect(() => {
+    if (!lastMessage) return;
+    const { type, data } = lastMessage;
+
+    if (type === 'orderbook') {
+      const prev = prevMid.current;
+      const cur  = data.mid_price;
+      if (prev > 0) setMidDir(cur > prev ? 'up' : cur < prev ? 'down' : '');
+      prevMid.current = cur;
+      setOrderbook(data);
+    }
+    else if (type === 'metrics') {
+      setMetrics(data);
+    }
+    else if (type === 'candle') {
+      setLatestCandle(data.data);
+      setNewCandle(data.data);
+    }
+    else if (type === 'alert') {
+      const id = Date.now();
+      setAlerts(prev => [...prev, { ...data.data, id }]);
+      // 4초 후 페이드아웃, 4.5초 후 제거
+      setTimeout(() => setAlerts(prev => prev.map(a => a.id === id ? { ...a, fading: true } : a)), 4000);
+      setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 4500);
+    }
+  }, [lastMessage]);
+
+  return (
+    <>
+      {/* 알람 오버레이 */}
+      <AlertBanner alerts={alerts} />
+
+      {/* 헤더 */}
+      <header className="header">
+        <div className="header-title">
+          <span>HFT</span> Market Making Dashboard
+        </div>
+        <div className="header-meta">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className={`status-dot`} style={{ background: isConnected ? 'var(--green)' : 'var(--red)' }} />
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+              {isConnected ? 'LIVE' : 'RECONNECTING…'}
+            </span>
+          </div>
+          <div className={`mid-price ${midDir}`}>
+            {orderbook?.mid_price?.toFixed(2) ?? '–'}
+          </div>
+          <div className="tick-count">
+            Tick #{metrics?.tick ?? 0}
+          </div>
+        </div>
+      </header>
+
+      {/* 메인 그리드 */}
+      <div className="main-grid">
+
+        {/* 캔들 차트 패널 */}
+        <div className="panel chart-panel">
+          <div className="panel-header">
+            <span className="panel-title">1분봉 차트</span>
+            <div className="legend">
+              <div className="legend-item"><div className="legend-dot" style={{background:'#e3b341'}}/>VWAP</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:'#f85149'}}/>전환선</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:'#58a6ff'}}/>기준선</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:'#f85149', opacity:.6}}/>R2/R1</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:'#8b949e'}}/>P</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:'#3fb950', opacity:.6}}/>S1/S2</div>
+            </div>
+          </div>
+          <div className="panel-body" ref={chartContainerRef}>
+            <CandleChart newCandle={newCandle} containerRef={chartContainerRef} />
+          </div>
+        </div>
+
+        {/* 호가창 패널 */}
+        <div className="panel orderbook-panel">
+          <div className="panel-header">
+            <span className="panel-title">호가창 & 에이전트 주문</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+              {orderbook ? `${orderbook.bids?.length + orderbook.asks?.length} levels` : '–'}
+            </span>
+          </div>
+          <div className="panel-body">
+            <OrderBook data={orderbook} />
+          </div>
+        </div>
+
+        {/* 하단 패널 */}
+        <div className="panel bottom-panel">
+          <div className="panel-header">
+            <span className="panel-title">실시간 PnL · 재고 · 시그널</span>
+            {latestCandle && (
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                BB%: {(latestCandle.bb_pct * 100)?.toFixed(1) ?? '–'}%
+              </span>
+            )}
+          </div>
+          <div className="panel-body">
+            <BottomPanel metrics={metrics} latestCandle={latestCandle} />
+          </div>
+        </div>
+
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
