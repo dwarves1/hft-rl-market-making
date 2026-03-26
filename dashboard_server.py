@@ -27,6 +27,19 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 from typing import Any
 
 import numpy as np
@@ -77,7 +90,7 @@ class ConnectionManager:
     async def broadcast(self, payload: dict) -> None:
         if not self._clients:
             return
-        text = json.dumps(payload, ensure_ascii=False)
+        text = json.dumps(payload, ensure_ascii=False, cls=NumpyEncoder)
         dead: set[WebSocket] = set()
         for ws in self._clients:
             try:
@@ -121,6 +134,9 @@ class SimState:
         # 알람 쿨다운
         self._last_alert_time: float = 0.0
 
+        # 가상 캔들 타임스탬프 (60초씩 증가)
+        self._candle_time: int = int(time.time()) - 3600  # 1시간 전부터 시작
+
         # 전일 고/저/종 (피벗용)
         self._prev_high:  float = 0.0
         self._prev_low:   float = 0.0
@@ -153,13 +169,14 @@ class SimState:
             self._prev_close = day[-1]["close"]
 
         if self._bar_ticks >= CANDLE_TICKS:
+            self._candle_time += 60
             bar = {
                 "open":   self._bar_open,
                 "high":   self._bar_high,
                 "low":    self._bar_low,
                 "close":  price,
                 "volume": sum(self._bar_vols),
-                "time":   int(time.time()),
+                "time":   self._candle_time,
             }
             # VWAP (봉 내)
             if self._bar_vols:
@@ -489,12 +506,12 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         # 초기 스냅샷 전송
         if sim_state.last_orderbook:
-            await ws.send_text(json.dumps(sim_state.last_orderbook))
+            await ws.send_text(json.dumps(sim_state.last_orderbook, cls=NumpyEncoder))
         if sim_state.last_metrics:
-            await ws.send_text(json.dumps(sim_state.last_metrics))
+            await ws.send_text(json.dumps(sim_state.last_metrics, cls=NumpyEncoder))
         for bar in list(sim_state.candles)[-50:]:
             candle_payload = sim_state.build_candle_payload(bar, bar["close"])
-            await ws.send_text(json.dumps(candle_payload))
+            await ws.send_text(json.dumps(candle_payload, cls=NumpyEncoder))
 
         # 연결 유지 (핑/퐁)
         while True:

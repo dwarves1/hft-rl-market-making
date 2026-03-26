@@ -467,27 +467,36 @@ function AlertBanner({ alerts }) {
 /* ──────────────────────────────────────────────
    캔들 차트 (Lightweight Charts)
 ──────────────────────────────────────────────── */
-function CandleChart({ newCandle, containerRef }) {
+function CandleChart({ newCandle, containerRef, candleHistory }) {
   const chartRef      = useRef(null);
   const candleSeriesRef = useRef(null);
   const vwapRef       = useRef(null);
   const tenkanRef     = useRef(null);
   const kijunRef      = useRef(null);
   const pvtLines      = useRef({});   // P, R1, R2, S1, S2
+  const historyLoaded = useRef(false);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    const chart = LightweightCharts.createChart(el, {
-      layout:     { background: { color: '#0d1117' }, textColor: '#8b949e' },
-      grid:       { vertLines: { color: '#1c2128' }, horzLines: { color: '#1c2128' } },
-      crosshair:  { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#30363d' },
-      timeScale:  { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
-      width:  el.clientWidth,
-      height: el.clientHeight,
-    });
+    const initChart = () => {
+      const w = el.clientWidth  || el.offsetWidth  || 600;
+      const h = el.clientHeight || el.offsetHeight || 300;
+
+      const chart = LightweightCharts.createChart(el, {
+        layout:     { background: { color: '#0d1117' }, textColor: '#8b949e' },
+        grid:       { vertLines: { color: '#1c2128' }, horzLines: { color: '#1c2128' } },
+        crosshair:  { mode: LightweightCharts.CrosshairMode.Normal },
+        rightPriceScale: { borderColor: '#30363d' },
+        timeScale:  { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+        width: w,
+        height: h,
+      });
+      return chart;
+    };
+
+    const chart = initChart();
     chartRef.current = chart;
 
     // 캔들 시리즈
@@ -541,9 +550,34 @@ function CandleChart({ newCandle, containerRef }) {
     return () => { ro.disconnect(); chart.remove(); };
   }, []);
 
+  // 히스토리 캔들 → setData() 로 초기화
+  useEffect(() => {
+    if (!candleHistory || candleHistory.length === 0) return;
+    if (!candleSeriesRef.current) return;
+
+    const candles = candleHistory.map(d => ({ time: d.time, open: d.open, high: d.high, low: d.low, close: d.close }));
+    candleSeriesRef.current.setData(candles);
+
+    const vwapData    = candleHistory.filter(d => d.vwap).map(d => ({ time: d.time, value: d.vwap }));
+    const tenkanData  = candleHistory.filter(d => d.tenkan).map(d => ({ time: d.time, value: d.tenkan }));
+    const kijunData   = candleHistory.filter(d => d.kijun).map(d => ({ time: d.time, value: d.kijun }));
+    if (vwapData.length)   vwapRef.current?.setData(vwapData);
+    if (tenkanData.length) tenkanRef.current?.setData(tenkanData);
+    if (kijunData.length)  kijunRef.current?.setData(kijunData);
+
+    ['R2','R1','P','S1','S2'].forEach(k => {
+      const pvtData = candleHistory.filter(d => d[`pivot_${k}`]).map(d => ({ time: d.time, value: d[`pivot_${k}`] }));
+      if (pvtData.length) pvtLines.current[k]?.setData(pvtData);
+    });
+
+    historyLoaded.current = true;
+    chartRef.current?.timeScale().fitContent();
+  }, [candleHistory]);
+
   // 새 캔들 수신 시 시리즈 업데이트
   useEffect(() => {
     if (!newCandle || !candleSeriesRef.current) return;
+    if (!historyLoaded.current) return;
     const d = newCandle;
     const t = d.time;
 
@@ -643,6 +677,7 @@ function App() {
   const [newCandle,    setNewCandle]    = useState(null);
   const [alerts,       setAlerts]       = useState([]);
   const [midDir,       setMidDir]       = useState('');
+  const [candleHistory, setCandleHistory] = useState([]);
   const prevMid = useRef(0);
 
   const chartContainerRef = useRef(null);
@@ -663,12 +698,18 @@ function App() {
       setMetrics(data);
     }
     else if (type === 'candle') {
-      setLatestCandle(data.data);
-      setNewCandle(data.data);
+      setLatestCandle(data);
+      setNewCandle(data);
+      setCandleHistory(prev => {
+        const exists = prev.some(c => c.time === data.time);
+        if (exists) return prev;
+        const next = [...prev, data].sort((a, b) => a.time - b.time);
+        return next;
+      });
     }
     else if (type === 'alert') {
       const id = Date.now();
-      setAlerts(prev => [...prev, { ...data.data, id }]);
+      setAlerts(prev => [...prev, { ...data, id }]);
       // 4초 후 페이드아웃, 4.5초 후 제거
       setTimeout(() => setAlerts(prev => prev.map(a => a.id === id ? { ...a, fading: true } : a)), 4000);
       setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 4500);
@@ -718,7 +759,7 @@ function App() {
             </div>
           </div>
           <div className="panel-body" ref={chartContainerRef}>
-            <CandleChart newCandle={newCandle} containerRef={chartContainerRef} />
+            <CandleChart newCandle={newCandle} containerRef={chartContainerRef} candleHistory={candleHistory} />
           </div>
         </div>
 
